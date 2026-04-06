@@ -1,8 +1,20 @@
+--extra-index-url https://download.pytorch.org/whl/cu128
 markdownify
+numpy==1.26.4
 smolagents==1.13.0
 torchreid
 ultralytics==8.4.23
-torch==2.10.0+cu128
-torchvision==0.25.0+cu128
+torch==2.10.0
+torchvision==0.25.0
+torchaudio==2.10.0
 pillow==11.1.0
 transformers==4.57.6
+peft==0.18.1
+DALL-E==0.1
+attrs==25.4.0
+datasets==4.5.0
+torchmetrics==1.8.2
+scikit-learn
+scikit-image
+gdown
+tensorboard
