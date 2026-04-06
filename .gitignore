@@ -90,4 +90,4 @@ perf/
 ppt/
 videos/
 results/
-checkpoints/
+tmp_trainer/
