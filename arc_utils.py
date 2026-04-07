@@ -2,6 +2,7 @@ import numpy as np
 from PIL import Image
 
 import torch
+from torch import nn
 import torchvision.transforms as T
 
 from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
@@ -39,7 +40,6 @@ class ArcProcessor(MllamaProcessor):
 		if text is None:
 			text = ""
 		if images is not None:
-			print(len(images))
 			with torch.inference_mode():
 				masks = []
 				_text = ""
@@ -92,4 +92,80 @@ class ArcProcessor(MllamaProcessor):
 			vq_enc,
 			image_processor=processor.image_processor,
 			tokenizer=processor.tokenizer
+		)
+
+
+class ExtendedLMHead(nn.Module):
+
+	def __init__(self, base_head, extra_tokens, hidden_size=4096):
+		super().__init__()
+		self.base_head = base_head
+		self.extra_head = nn.Linear(
+			hidden_size,
+			extra_tokens,
+			bias=False
+		)
+
+		# freeze original head
+		self.base_head.weight.requires_grad = False
+
+	def forward(self, x):
+		old_logits = self.base_head(x)
+		new_logits = self.extra_head(x)
+		return torch.cat([old_logits, new_logits], dim=-1)
+	
+	@classmethod
+	def from_llama(cls, ckpt_path, model):
+		vq_enc: Encoder = load_model(f"{ckpt_path}/encoder.pkl", "cpu")
+		return cls(
+			base_head=model.lm_head,
+			extra_tokens=vq_enc.vocab_size+2,
+			hidden_size=model.lm_head.in_features,
+		)
+
+class ExtendEmbedding(nn.Module):
+
+	def __init__(self, base_embedding: nn.Embedding, extra_tokens: int):
+		super().__init__()
+
+		self.base_embedding = base_embedding
+
+		self.base_vocab_size = base_embedding.num_embeddings
+		self.hidden_size = base_embedding.embedding_dim
+
+		self.extra_embedding = nn.Embedding(
+			extra_tokens,
+			self.hidden_size,
+			padding_idx=None,
+		)
+
+	def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
+		orig_shape = input_ids.shape
+		flat_ids = input_ids.view(-1)
+
+		is_extra = flat_ids >= self.base_vocab_size
+
+		# map ids to valid ranges
+		base_ids = flat_ids.clamp(max=self.base_vocab_size - 1)
+		extra_ids = flat_ids - self.base_vocab_size
+
+		# lookup both
+		base_out = self.base_embedding(base_ids)
+		extra_out = self.extra_embedding(extra_ids.clamp(min=0))
+
+		# select output
+		out = torch.where(
+			is_extra.unsqueeze(-1),
+			extra_out,
+			base_out
+		)
+
+		return out.view(*orig_shape, self.hidden_size)
+	
+	@classmethod
+	def from_llama(cls, ckpt_path, model):
+		vq_enc: Encoder = load_model(f"{ckpt_path}/encoder.pkl", "cpu")
+		return cls(
+			base_embedding=model.language_model.embed_tokens,
+			extra_tokens=vq_enc.vocab_size+2,
 		)

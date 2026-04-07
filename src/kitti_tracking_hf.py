@@ -113,14 +113,17 @@ class KittiHFIterableDataset:
             images = sorted(seq_dir.glob("*.png"))
             pcds = sorted((velo_root / seq_name).glob("*.bin"))
 
-            window = self.n_steps + self.n_pred_steps - 1
+            window = self.n_steps + self.n_pred_steps
 
-            for i in range(len(images) - window):
+            for i in range(len(images) - window + 1):
                 rgb_list = []
                 depth_list = []
 
                 img_paths = images[i:i + window]
                 pcd_paths = pcds[i:i + window]
+
+                if len(images) < window:
+                    continue
 
                 for img_path, pcd_path in zip(img_paths, pcd_paths):
                     img = Image.open(img_path).convert("RGB")

@@ -8,8 +8,8 @@ import torchvision.transforms as transforms
 
 from smolagents import Tool
 
-from DSTT.DSTT_OM import InpaintGenerator as DSTT_OM
-from DSTT.DSTT_R import InpaintGenerator as DSTT_R
+from .DSTT_OM import InpaintGenerator as DSTT_OM
+from .DSTT_R import InpaintGenerator as DSTT_R
 
 
 class InpaintingTool(Tool):
