@@ -122,9 +122,6 @@ class KittiHFIterableDataset:
                 img_paths = images[i:i + window]
                 pcd_paths = pcds[i:i + window]
 
-                if len(images) < window:
-                    continue
-
                 for img_path, pcd_path in zip(img_paths, pcd_paths):
                     img = Image.open(img_path).convert("RGB")
 
@@ -148,6 +145,9 @@ class KittiHFIterableDataset:
 
                     rgb_list.append(img)
                     depth_list.append(depth)
+
+                if len(rgb_list) < window:
+                    continue
 
                 yield {
                     "rgb": rgb_list,
