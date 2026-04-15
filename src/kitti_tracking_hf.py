@@ -7,183 +7,227 @@ import torch
 from torch.utils.data import Dataset
 import torchvision.transforms as T
 
-from matplotlib import pyplot as plt
+from dall_e import map_pixels, unmap_pixels, load_model
+from dall_e import Encoder, Decoder
+
+from transformers import CLIPSegProcessor, CLIPSegForImageSegmentation
 
 from pathlib import Path
 from datasets import IterableDataset
 import numpy as np
 from PIL import Image
 
+from matplotlib import pyplot as plt
+
 
 class KittiHFIterableDataset:
-    def __init__(
-        self,
-        root_dir: str,
-        split: str,
-        n_steps: int,
-        n_pred_steps: int,
-        transform=None
-    ):
-        self.root_dir = Path(root_dir)
-        self.split = split
-        self.n_steps = n_steps
-        self.n_pred_steps = n_pred_steps
-        self.transform = transform
+	def __init__(
+		self,
+		root_dir: str,
+		split: str,
+		n_steps: int,
+		n_pred_steps: int,
+		transform=None
+	):
+		self.root_dir = Path(root_dir)
+		self.split = split
+		self.n_steps = n_steps
+		self.n_pred_steps = n_pred_steps
+		self.transform = transform
 
-        self.base_dir = self.root_dir / split
+		self.base_dir = self.root_dir / split
 
-    @staticmethod
-    def load_calib(calib_path):
-        calib_data = {}
+		# self.vq_enc: Encoder = load_model("../checkpoints/encoder.pkl", "cpu")
+		
+		# clip_segm_name = "CIDAS/clipseg-rd64-refined"
+		# self.clip_segm_processor = CLIPSegProcessor.from_pretrained(clip_segm_name, use_fast=True)
+		# self.clip_segm_model = CLIPSegForImageSegmentation.from_pretrained(clip_segm_name)#.to(device)
+		# self.size = (352, 352)
+		# self.prompts = ["person", "vehicle"]
 
-        with open(calib_path, "r") as f:
-            for i, line in enumerate(f.readlines()):
-                if not line.strip():
-                    continue
+	@staticmethod
+	def load_calib(calib_path):
+		calib_data = {}
 
-                if i < 4:
-                    key, values = line.split(":", 1)
-                else:
-                    key, values = line.split(" ", 1)
+		with open(calib_path, "r") as f:
+			for i, line in enumerate(f.readlines()):
+				if not line.strip():
+					continue
 
-                calib_data[key] = np.array(
-                    [float(x) for x in values.split()],
-                    dtype=np.float32
-                )
+				if i < 4:
+					key, values = line.split(":", 1)
+				else:
+					key, values = line.split(" ", 1)
 
-        calib_data["P2"] = calib_data["P2"].reshape(3, 4)
-        calib_data["P3"] = calib_data["P3"].reshape(3, 4)
+				calib_data[key] = np.array(
+					[float(x) for x in values.split()],
+					dtype=np.float32
+				)
 
-        calib_data["Tr_velo_cam"] = calib_data["Tr_velo_cam"].reshape(3, 4)
-        calib_data["Tr_velo_cam"] = np.vstack(
-            [calib_data["Tr_velo_cam"], [0, 0, 0, 1]]
-        )
+		calib_data["P2"] = calib_data["P2"].reshape(3, 4)
+		calib_data["P3"] = calib_data["P3"].reshape(3, 4)
 
-        calib_data["R_rect"] = calib_data["R_rect"].reshape(3, 3)
+		calib_data["Tr_velo_cam"] = calib_data["Tr_velo_cam"].reshape(3, 4)
+		calib_data["Tr_velo_cam"] = np.vstack(
+			[calib_data["Tr_velo_cam"], [0, 0, 0, 1]]
+		)
 
-        return calib_data
+		calib_data["R_rect"] = calib_data["R_rect"].reshape(3, 3)
 
-    def _generate_depth(self, point_cloud, calib, image_size):
-        P2 = calib["P2"]
+		return calib_data
 
-        R_rect = np.eye(4, dtype=np.float32)
-        R_rect[:3, :3] = calib["R_rect"]
+	def _generate_depth(self, point_cloud, calib, image_size):
+		P2 = calib["P2"]
 
-        Tr = calib["Tr_velo_cam"]
+		R_rect = np.eye(4, dtype=np.float32)
+		R_rect[:3, :3] = calib["R_rect"]
 
-        point_cloud = np.column_stack(
-            (point_cloud[:, :3], np.ones(len(point_cloud)))
-        )
+		Tr = calib["Tr_velo_cam"]
 
-        pts_3d = (R_rect @ Tr @ point_cloud.T).T
-        pts_3d = pts_3d[pts_3d[:, 2] > 0]
+		point_cloud = np.column_stack(
+			(point_cloud[:, :3], np.ones(len(point_cloud)))
+		)
 
-        pts_2d = (P2 @ pts_3d.T).T
+		pts_3d = (R_rect @ Tr @ point_cloud.T).T
+		pts_3d = pts_3d[pts_3d[:, 2] > 0]
 
-        depth = np.zeros((image_size[1], image_size[0]), dtype=np.float32)
+		pts_2d = (P2 @ pts_3d.T).T
 
-        uv = pts_2d[:, :2] / pts_2d[:, 2:3]
-        u = np.round(uv[:, 0]).astype(int)
-        v = np.round(uv[:, 1]).astype(int)
+		depth = np.zeros((image_size[1], image_size[0]), dtype=np.float32)
 
-        valid = (
-            (u >= 0)
-            & (u < image_size[0])
-            & (v >= 0)
-            & (v < image_size[1])
-        )
+		uv = pts_2d[:, :2] / pts_2d[:, 2:3]
+		u = np.round(uv[:, 0]).astype(int)
+		v = np.round(uv[:, 1]).astype(int)
 
-        if valid.any():
-            depth[v[valid], u[valid]] = (
-                pts_2d[valid, 2] / pts_2d[valid, 2].max()
-            )
+		valid = (
+			(u >= 0)
+			& (u < image_size[0])
+			& (v >= 0)
+			& (v < image_size[1])
+		)
 
-        return depth
+		if valid.any():
+			depth[v[valid], u[valid]] = (
+				pts_2d[valid, 2] / pts_2d[valid, 2].max()
+			)
 
-    def generator(self):
-        image_root = self.base_dir / "image_02"
-        velo_root = self.base_dir / "velodyne"
-        calib_root = self.base_dir / "calib"
+		return depth
 
-        for seq_dir in sorted(image_root.iterdir()):
-            seq_name = seq_dir.name
+	@staticmethod
+	def preprocess(img: Image.Image) -> torch.Tensor:
+		img = torch.unsqueeze(T.ToTensor()(img), 0)
+		return map_pixels(img)  # (1 - 2 * 0.1) * x + 0.1
+	
+	def generator(self):
+		image_root = self.base_dir / "image_02"
+		velo_root = self.base_dir / "velodyne"
+		calib_root = self.base_dir / "calib"
 
-            calib = self.load_calib(calib_root / f"{seq_name}.txt")
+		for seq_dir in sorted(image_root.iterdir()):
+			seq_name = seq_dir.name
 
-            images = sorted(seq_dir.glob("*.png"))
-            pcds = sorted((velo_root / seq_name).glob("*.bin"))
+			calib = self.load_calib(calib_root / f"{seq_name}.txt")
 
-            window = self.n_steps + self.n_pred_steps
+			images = sorted(seq_dir.glob("*.png"))
+			pcds = sorted((velo_root / seq_name).glob("*.bin"))
 
-            for i in range(len(images) - window + 1):
-                rgb_list = []
-                depth_list = []
+			window = self.n_steps + self.n_pred_steps
 
-                img_paths = images[i:i + window]
-                pcd_paths = pcds[i:i + window]
+			for i in range(len(images) - window + 1):
+				rgb_list = []
+				depth_list = []
 
-                for img_path, pcd_path in zip(img_paths, pcd_paths):
-                    img = Image.open(img_path).convert("RGB")
+				img_paths = images[i:i + window]
+				pcd_paths = pcds[i:i + window]
 
-                    point_cloud = np.fromfile(
-                        pcd_path,
-                        dtype=np.float32
-                    ).reshape(-1, 4)
+				for img_path, pcd_path in zip(img_paths, pcd_paths):
+					img = Image.open(img_path).convert("RGB")
 
-                    depth = self._generate_depth(
-                        point_cloud,
-                        calib,
-                        img.size
-                    )
+					point_cloud = np.fromfile(
+						pcd_path,
+						dtype=np.float32
+					).reshape(-1, 4)
 
-                    if self.transform:
-                        img = self.transform(img)
-                        depth = self.transform(Image.fromarray(depth))
-                    else:
-                        img = np.array(img)
-                        depth = depth
+					depth = self._generate_depth(
+						point_cloud,
+						calib,
+						img.size
+					)
 
-                    rgb_list.append(img)
-                    depth_list.append(depth)
+					if self.transform:
+						img = self.transform(img)
+						depth = self.transform(Image.fromarray(depth))
+					else:
+						img = np.array(img)
+						depth = depth
 
-                if len(rgb_list) < window:
-                    continue
+					rgb_list.append(img)
+					depth_list.append(depth)
 
-                yield {
-                    "rgb": rgb_list,
-                    "depth": depth_list,
-                    "calib": {
-                        "P2": calib["P2"],
-                        "R_rect": calib["R_rect"],
-                        "Tr_velo_cam": calib["Tr_velo_cam"]
-                    }
-                }
+				if len(rgb_list) < window:
+					continue
 
-    def to_hf_dataset(self):
-        return IterableDataset.from_generator(self.generator)
-    
+				# text_list = []
+				# for img in rgb_list:
+				# 	inputs = self.clip_segm_processor(
+				# 		text=self.prompts, images=[img]*len(self.prompts),
+				# 		return_tensors="pt"
+				# 	)
+				# 	outputs = self.clip_segm_model(**inputs)
+				# 	mask = outputs.logits.amax(0).sigmoid().float().cpu().numpy()
+				# 	mask = Image.fromarray((mask > 0.5).astype(np.uint8) * 255).resize(self.size)
+					
+				# 	x = self.preprocess(mask.convert("RGB"))#.to(dev)
+				# 	z_logits = self.vq_enc(x)
+				# 	z = torch.argmax(z_logits.detach(), axis=1)
+
+				# 	# " Given above image, the mask tokens for the image are: " + \
+				# 	# "<|image|>" +\
+				# 	_z = z[0].cpu().numpy()
+				# 	_text += "<begin_mask>" + "".join([
+				# 		f"<|vq_{_z[i, j]}>"
+				# 		for i in range(_z.shape[0])
+				# 		for j in range(_z.shape[1])
+				# 	]) + "<|end_mask|>"
+				# 	text_list.append(_text)
+
+
+				yield {
+					"rgb": rgb_list,
+					"depth": depth_list,
+					# "text": text_list,
+					"calib": {
+						"P2": calib["P2"],
+						"R_rect": calib["R_rect"],
+						"Tr_velo_cam": calib["Tr_velo_cam"]
+					}
+				}
+
+	def to_hf_dataset(self):
+		return IterableDataset.from_generator(self.generator)
+	
 
 if __name__ == "__main__":
-    root_dir = "C:/Users/ngoak/data/kitti_tracking"
-    n_steps, n_pred_steps = 16, 3
+	root_dir = "C:/Users/ngoak/data/kitti_tracking"
+	n_steps, n_pred_steps = 16, 3
 
-    dataset_builder = KittiHFIterableDataset(
-        root_dir="C:/Users/ngoak/data/kitti_tracking",
-        split="training",
-        n_steps=n_steps,
-        n_pred_steps=n_pred_steps,
-        # transform=T.Compose([
-        #     T.Resize((240, 640)),
-        # ])
-    )
+	dataset_builder = KittiHFIterableDataset(
+		root_dir="C:/Users/ngoak/data/kitti_tracking",
+		split="training",
+		n_steps=n_steps,
+		n_pred_steps=n_pred_steps,
+		# transform=T.Compose([
+		#     T.Resize((240, 640)),
+		# ])
+	)
 
-    hf_dataset = dataset_builder.to_hf_dataset()
+	hf_dataset = dataset_builder.to_hf_dataset()
 
-    sample = next(iter(hf_dataset))
-    print(sample.keys())
+	sample = next(iter(hf_dataset))
+	print(sample.keys())
 
 
 # %%
-    plt.imshow(
-        PIL.Image.fromarray(1000*sample['depth'][0])
-    )
+	plt.imshow(
+		PIL.Image.fromarray(1000*sample['depth'][0])
+	)

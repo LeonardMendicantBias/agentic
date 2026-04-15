@@ -64,10 +64,10 @@ class ArcProcessor(MllamaProcessor):
 					# "<|image|>" +\
 					_z = z[0].cpu().numpy()
 					_text += "<begin_mask>" + "".join([
-						f"<vq_{_z[i, j]}>"
+						f"<|vq_{_z[i, j]}>"
 						for i in range(_z.shape[0])
 						for j in range(_z.shape[1])
-					]) + "<end_mask>"
+					]) + "<|end_mask|>"
 				text += "<|begin_of_text|>" + _text + "<|end_of_text|>"
 
 		# if mask is not None:
@@ -155,14 +155,27 @@ class ARCCollator:
 		zs = torch.argmax(z_logits.detach(), axis=1)  # (B, H', W')
 		texts = [
 			# self.image_token + 
-			self.tokenizer.bom_token + "".join([
+			# self.tokenizer.bom_token
+			"<|begin_of_mask|>" + "".join([
 				f"<|vq_{_z[i, j]}|>"
 				for i in range(_z.shape[0])
 				for j in range(_z.shape[1])
-			]) + self.tokenizer.eom_token
+			]) + "<|end_of_mask|>"  # self.tokenizer.eom_token
 			for _z in zs
 		]
 		return texts
+	
+	def find_index_of_bom(self, tokens):
+		temp = self.tokenizer("<|begin_of_mask|>", add_special_tokens=False)
+		bom_ids = temp['input_ids']
+		
+		n, m = len(tokens)-1, len(bom_ids)-1
+
+		ids = []
+		for i in range(n - m + 1):
+			if tokens[i:i+m].tolist() == bom_ids[:-1]:
+				ids.append(i)
+		return ids
 
 	@torch.no_grad()
 	def _get_mask(self, images, prompts) -> List[Image.Image]:
@@ -179,7 +192,7 @@ class ARCCollator:
 			masks.append(mask)
 		return masks
 
-	def __call__(self, batch, prompts):
+	def __call__(self, batch, prompts, application):
 		# print(batch)
 		texts, images = [], []
 		for sample in batch:
@@ -188,34 +201,76 @@ class ARCCollator:
 			_masks = self._get_mask(_imgs, prompts)
 			_mask_texts = self.convert_mask_to_text(_masks)
 
-			text = self.tokenizer.bos_token + "".join([
-				f"<|start_header_id|>user<|end_header_id|>\n\n<|image|>" +\
-				"Extract potential image regions. <|eot_id|>\n\n" +\
-				f"<|start_header_id|>assistant<|end_header_id|>\n\n"+\
-				f"{mask}<|eot_id|>"
-				for mask in _mask_texts
-			]) + self.tokenizer.eos_token
+			messages = [{
+				"role": "system",
+				"content": [
+					{
+						"type": "text",
+						"text": (
+							"You are a critic that selects sensing regions likely to contain "
+							"salient information not already visible in the current image. "
+							f"You should request sensing data regions for the application {application}. "
+							"The generated mask tokens must be enclosed within "
+							"<|begin_of_mask|> and <|end_of_mask|>."
+						)
+					}
+				]
+			}]
+			for mask in _mask_texts:
+				messages.extend([
+					{
+						"role": "user",
+						"content": [
+							{"type": "image"},
+							{
+								"type": "text",
+								"text": f"Generate mask tokens for this image."
+							}
+						]
+					},
+					{
+						"role": "assistant",
+						"content": [
+							{"type": "text", "text": mask}
+						]
+					},
+					{
+						"role": "user",
+						"content": [
+							{
+								"type": "text",
+								"text": f"Evaluation score: 98%."
+							}
+						]
+					}
+				])
+
+			text = self.processor.apply_chat_template(
+				messages,
+				add_generation_prompt=False
+			)
 			texts.append(text)
 
-		# print(texts[0])
 		batch = self.processor(
-			text=texts, images=images,
-			return_tensors="pt",# padding=True, 
-			add_special_tokens=False,
-			truncation=False
+			text=texts,
+			images=images,
+			return_tensors="pt",
+			padding=True,
+			truncation=False,
+			add_special_tokens=False
 		)
 
-		# The labels are the input_ids, and we mask the padding tokens in the loss computation
 		labels = batch["input_ids"].clone()
-		labels[labels == self.processor.tokenizer.pad_token_id] = -100  #
-		# Ignore the image token index in the loss computation (model specific)
-		image_token_id = self.processor.tokenizer.convert_tokens_to_ids(self.processor.image_token)
-		labels[labels == image_token_id] = -100
-		for i in range(labels.shape[0]):
-			_idx = (labels[i] == self.tokenizer.convert_tokens_to_ids("<|begin_of_mask|>")).nonzero(as_tuple=True)[0]
-			labels[i][:_idx.max()] = -100
-		batch["labels"] = labels
+		labels[labels == self.pad_token_id] = self.ignore_index
+		labels[labels == self.image_token_id] = self.ignore_index
 
+		bom_id = self.tokenizer.convert_tokens_to_ids("<|begin_of_mask|>")
+		for i in range(labels.shape[0]):
+			idx = (labels[i] == bom_id).nonzero(as_tuple=True)[0]
+			if len(idx) > 0:
+				labels[i][:idx[0]] = self.ignore_index
+
+		batch["labels"] = labels
 		return batch
 	
 	
