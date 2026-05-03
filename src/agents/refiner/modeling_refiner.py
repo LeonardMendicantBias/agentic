@@ -18,7 +18,7 @@ from transformers.models.clipseg.modeling_clipseg import CLIPSegModel, CLIPSegDe
 from transformers.models.clipseg.modeling_clipseg import CLIPSegOutput, CLIPSegDecoderOutput
 from transformers.modeling_outputs import BaseModelOutputWithPooling
 
-from configuration_refiner import RefinerConfig
+from src.agents.refiner.configuration_refiner import RefinerConfig
 
 from transformers import BatchEncoding
 

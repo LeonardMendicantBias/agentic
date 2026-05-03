@@ -46,13 +46,13 @@ class SemanticSegmentationTool(Tool):
 		super().setup()
 	
 	def forward(self, frame: PIL.Image.Image, prompt: List[str]) -> PIL.Image.Image:
-		inputs = self.processor(
-			images=[frame]*len(prompt),
-			text=prompt,
-			padding=True,
-			truncation=True,
-			return_tensors="pt"
-		).to(self.device)
+		text_inputs = self.processor.tokenizer(
+			prompt, padding=True, truncation=True, return_tensors="pt"
+		)
+		image_inputs = self.processor.image_processor(
+			[frame] * len(prompt), return_tensors="pt"
+		)
+		inputs = {k: v.to(self.device) for k, v in {**text_inputs, **image_inputs}.items()}
 		outputs = self.model(**inputs)
 		
 		mask = outputs.logits.amax(0).sigmoid().float().cpu().numpy()
@@ -87,7 +87,7 @@ class SemanticSegmentationTool(Tool):
 	# 	return sem_mask.resize(frame.size)
 
 if __name__ == "__main__":
-	from refiner.kitti_tracking import KittiDataset
+	from src.agents.refiner.kitti_tracking import KittiDataset
 
 	root_dir = "E:/KittiTracking"
 	n_steps, n_pred_steps = 16, 3

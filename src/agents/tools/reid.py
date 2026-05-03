@@ -132,7 +132,7 @@ class ReIDTool(Tool):
 	
 
 if __name__ == "__main__":
-	from refiner.kitti_tracking import KittiDataset
+	from src.agents.refiner.kitti_tracking import KittiDataset
 	from matplotlib import pyplot as plt
 
 	model_name = "osnet_x0_25"

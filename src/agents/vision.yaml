@@ -59,7 +59,7 @@
 
   Code:
   ```py
-  recon_rgb_frame = inpainting_tool(masked_frame=rgb_frame, mask=rgb_mask)
+  recon_rgb_frame = inpainting_tool(image=rgb_frame, mask=rgb_mask)
   sem_rgb_mask = semantic_segmentation_tool(frame=recon_rgb_frame, prompt=object_classes)
   sem_depth_mask = sem_rgb_mask.copy()
   final_answer([sem_rgb_mask, sem_depth_mask])
@@ -78,7 +78,7 @@
 
   Code:
   ```py
-  recon_rgb_frame = inpainting_tool(masked_frame=rgb_frame, mask=rgb_mask)
+  recon_rgb_frame = inpainting_tool(image=rgb_frame, mask=rgb_mask)
   sem_rgb_mask = semantic_segmentation_tool(frame=recon_rgb_frame, prompt=object_classes)
   final_answer([sem_rgb_mask])
   ```<end_code>
@@ -92,7 +92,7 @@
   
   Code:
   ```py
-  recon_depth_frame = inpainting_tool(masked_frame=depth_frame, mask=depth_mask)
+  recon_depth_frame = inpainting_tool(image=depth_frame, mask=depth_mask)
   sem_depth_mask = semantic_segmentation_tool(recon_depth_frame, object_names)
   final_answer([sem_depth_mask])
   ```<end_code>
@@ -106,7 +106,7 @@
 
   Code:
   ```py
-  recon_rgb_frame = inpainting_tool(masked_frame=depth_frame, mask=depth_mask)
+  recon_rgb_frame = inpainting_tool(image=depth_frame, mask=depth_mask)
   sem_rgb_mask = semantic_segmentation_tool(frame=recon_rgb_frame, prompt=object_classes)
   final_answer([sem_rgb_mask])
   ```<end_code>
@@ -121,7 +121,7 @@
 
   Code:
   ```py
-  recon_rgb_frame = inpainting_tool(masked_frame=rgb_frame, mask=rgb_mask)
+  recon_rgb_frame = inpainting_tool(image=rgb_frame, mask=rgb_mask)
   sem_rgb_mask = semantic_segmentation_tool(frame=recon_rgb_frame, prompt=object_classes)
   sem_depth_mask = sem_rgb_mask.copy()
   final_answer([sem_rgb_mask, sem_depth_mask])
@@ -133,7 +133,7 @@
 
   Code:
   ```py
-  recon_rgb_frame = inpainting_tool(masked_frame=rgb_frame, mask=rgb_mask)
+  recon_rgb_frame = inpainting_tool(image=rgb_frame, mask=rgb_mask)
   sem_rgb_mask = semantic_segmentation_tool(frame=recon_rgb_frame, prompt=object_classes)
   sem_depth_mask = reid_tool(recon_rgb_frame)
   final_answer([sem_rgb_mask, sem_depth_mask])

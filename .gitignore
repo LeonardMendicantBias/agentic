@@ -83,6 +83,7 @@ Thumbs.db
 *.tmp
 *.temp
 ~$*
+.claude/
 
 backup/
 logs/

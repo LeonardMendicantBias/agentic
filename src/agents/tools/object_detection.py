@@ -54,6 +54,6 @@ class ObjectDetectionTool(Tool):
 		return results
 	
 if __name__ == "__main__":
-	from refiner.kitti_tracking import KittiDataset
+	from src.agents.refiner.kitti_tracking import KittiDataset
 	
 	object_detection_tool = ObjectDetectionTool()
